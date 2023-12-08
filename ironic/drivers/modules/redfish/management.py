@@ -22,10 +22,8 @@ from ironic.common import boot_devices
 from ironic.common import boot_modes
 from ironic.common import exception
 from ironic.common.i18n import _
-from ironic.common import utils
 from ironic.conductor import task_manager
 from ironic.drivers import base
-from ironic.drivers.modules import boot_mode_utils
 from ironic.drivers.modules.redfish import utils as redfish_utils
 
 LOG = log.getLogger(__name__)
@@ -56,64 +54,6 @@ if sushy:
 
     BOOT_DEVICE_PERSISTENT_MAP_REV = {v: k for k, v in
                                       BOOT_DEVICE_PERSISTENT_MAP.items()}
-
-
-def _set_boot_device(task, system, device, persistent=False):
-    """An internal routine to set the boot device.
-
-    :param task: a task from TaskManager.
-    :param system: a Redfish System object.
-    :param device: the Redfish boot device.
-    :param persistent: Boolean value. True if the boot device will
-                       persist to all future boots, False if not.
-                       Default: False.
-    :raises: SushyError on an error from the Sushy library
-    """
-    desired_enabled = BOOT_DEVICE_PERSISTENT_MAP_REV[persistent]
-    current_enabled = system.boot.get('enabled')
-
-    # NOTE(etingof): this can be racy, esp if BMC is not RESTful
-    enabled = (desired_enabled
-               if desired_enabled != current_enabled else None)
-
-    use_new_set_system_boot = True
-
-    try:
-        try:
-            system.set_system_boot_options(device, enabled=enabled)
-        except AttributeError:
-            enabled = desired_enabled
-            use_new_set_system_boot = False
-            system.set_system_boot_source(device, enabled=enabled)
-    except sushy.exceptions.SushyError as e:
-        if enabled == sushy.BOOT_SOURCE_ENABLED_CONTINUOUS:
-            # NOTE(dtantsur): continuous boot device settings have been
-            # removed from Redfish, and some vendors stopped supporting
-            # it before an alternative was provided. As a work around,
-            # use one-time boot and restore the boot device on every
-            # reboot via RedfishPower.
-            LOG.debug('Error %(error)s when trying to set a '
-                      'persistent boot device on node %(node)s, '
-                      'falling back to one-time boot settings',
-                      {'error': e, 'node': task.node.uuid})
-
-            if use_new_set_system_boot:
-                system.set_system_boot_options(
-                    device, enabled=sushy.BOOT_SOURCE_ENABLED_ONCE)
-            else:
-                system.set_system_boot_source(
-                    device, enabled=sushy.BOOT_SOURCE_ENABLED_ONCE)
-
-            LOG.warning('Could not set persistent boot device to '
-                        '%(dev)s for node %(node)s, using one-time '
-                        'boot device instead',
-                        {'dev': device, 'node': task.node.uuid})
-            utils.set_node_nested_field(
-                task.node, 'driver_internal_info',
-                'redfish_boot_device', device)
-            task.node.save()
-        else:
-            raise
 
 
 class RedfishManagement(base.ManagementInterface):
@@ -156,33 +96,6 @@ class RedfishManagement(base.ManagementInterface):
         return list(BOOT_DEVICE_MAP_REV)
 
     @task_manager.require_exclusive_lock
-    def restore_boot_device(self, task, system):
-        """Restore boot device if needed.
-
-        Checks the redfish_boot_device internal flag and sets the one-time
-        boot device accordingly. A warning is issued if it fails.
-
-        This method is supposed to be called from the Redfish power interface
-        and should be considered private to the Redfish hardware type.
-
-        :param task: a task from TaskManager.
-        :param system: a Redfish System object.
-        """
-        device = task.node.driver_internal_info.get('redfish_boot_device')
-        if not device:
-            return
-
-        LOG.debug('Restoring boot device %(dev)s on node %(node)s',
-                  {'dev': device, 'node': task.node.uuid})
-        try:
-            _set_boot_device(task, system, device)
-        except sushy.exceptions.SushyError as e:
-            LOG.warning('Unable to recover boot device %(dev)s for node '
-                        '%(node)s, relying on the pre-configured boot order. '
-                        'Error: %(error)s',
-                        {'dev': device, 'node': task.node.uuid, 'error': e})
-
-    @task_manager.require_exclusive_lock
     def set_boot_device(self, task, device, persistent=False):
         """Set the boot device for a node.
 
@@ -199,26 +112,18 @@ class RedfishManagement(base.ManagementInterface):
         :raises: RedfishConnectionError when it fails to connect to Redfish
         :raises: RedfishError on an error from the Sushy library
         """
-        utils.pop_node_nested_field(
-            task.node, 'driver_internal_info', 'redfish_boot_device')
-        task.node.save()
-
         system = redfish_utils.get_system(task.node)
 
         try:
-            _set_boot_device(
-                task, system, BOOT_DEVICE_MAP_REV[device],
-                persistent=persistent)
+            system.set_system_boot_source(
+                BOOT_DEVICE_MAP_REV[device],
+                enabled=BOOT_DEVICE_PERSISTENT_MAP_REV[persistent])
         except sushy.exceptions.SushyError as e:
             error_msg = (_('Redfish set boot device failed for node '
                            '%(node)s. Error: %(error)s') %
                          {'node': task.node.uuid, 'error': e})
             LOG.error(error_msg)
             raise exception.RedfishError(error=error_msg)
-
-        # Ensure that boot mode is synced with what is set.
-        # Some BMCs reset it to default (BIOS) when changing the boot device.
-        boot_mode_utils.sync_boot_mode(task)
 
     def get_boot_device(self, task):
         """Get the current boot device for a node.
@@ -271,30 +176,28 @@ class RedfishManagement(base.ManagementInterface):
         :raises: RedfishError on an error from the Sushy library
         """
         system = redfish_utils.get_system(task.node)
-        try:
-            try:
-                system.set_system_boot_options(mode=BOOT_MODE_MAP_REV[mode])
-            except AttributeError:
-                boot_device = system.boot.get('target')
-                if not boot_device:
-                    error_msg = (_('Cannot change boot mode on node %(node)s '
-                                   'because its boot device is not set.') %
-                                 {'node': task.node.uuid})
-                    LOG.error(error_msg)
-                    raise exception.RedfishError(error_msg)
 
-                boot_override = system.boot.get('enabled')
-                if not boot_override:
-                    error_msg = (_('Cannot change boot mode on node %(node)s '
-                                   'because its boot source override is '
-                                   'not set.') %
-                                 {'node': task.node.uuid})
-                    LOG.error(error_msg)
-                    raise exception.RedfishError(error_msg)
-                system.set_system_boot_source(
-                    boot_device,
-                    enabled=boot_override,
-                    mode=BOOT_MODE_MAP_REV[mode])
+        boot_device = system.boot.get('target')
+        if not boot_device:
+            error_msg = (_('Cannot change boot mode on node %(node)s '
+                           'because its boot device is not set.') %
+                         {'node': task.node.uuid})
+            LOG.error(error_msg)
+            raise exception.RedfishError(error_msg)
+
+        boot_override = system.boot.get('enabled')
+        if not boot_override:
+            error_msg = (_('Cannot change boot mode on node %(node)s '
+                           'because its boot source override is not set.') %
+                         {'node': task.node.uuid})
+            LOG.error(error_msg)
+            raise exception.RedfishError(error_msg)
+
+        try:
+            system.set_system_boot_source(
+                boot_device,
+                enabled=boot_override,
+                mode=BOOT_MODE_MAP_REV[mode])
 
         except sushy.exceptions.SushyError as e:
             error_msg = (_('Setting boot mode to %(mode)s '

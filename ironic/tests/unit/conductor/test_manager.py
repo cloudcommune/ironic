@@ -3576,7 +3576,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin, db_base.DbTestCase):
     def test_continue_node_clean_wrong_state(self, mock_spawn):
         # Test the appropriate exception is raised if node isn't already
         # in CLEANWAIT state
-        prv_state = states.ACTIVE
+        prv_state = states.DELETING
         tgt_prv_state = states.AVAILABLE
         node = obj_utils.create_test_node(self.context, driver='fake-hardware',
                                           provision_state=prv_state,
@@ -4275,14 +4275,12 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin, db_base.DbTestCase):
     def test__do_next_clean_step_manual_last_step_noop(self):
         self._do_next_clean_step_last_step_noop(manual=True)
 
-    @mock.patch('ironic.drivers.utils.collect_ramdisk_logs', autospec=True)
     @mock.patch('ironic.drivers.modules.fake.FakePower.execute_clean_step',
                 autospec=True)
     @mock.patch('ironic.drivers.modules.fake.FakeDeploy.execute_clean_step',
                 autospec=True)
     def _do_next_clean_step_all(self, mock_deploy_execute,
-                                mock_power_execute, mock_collect_logs,
-                                manual=False):
+                                mock_power_execute, manual=False):
         # Run all steps from start to finish (all synchronous)
         tgt_prov_state = states.MANAGEABLE if manual else states.AVAILABLE
 
@@ -4324,7 +4322,6 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin, db_base.DbTestCase):
         mock_deploy_execute.assert_has_calls(
             [mock.call(mock.ANY, mock.ANY, self.clean_steps[0]),
              mock.call(mock.ANY, mock.ANY, self.clean_steps[2])])
-        self.assertFalse(mock_collect_logs.called)
 
     def test_do_next_clean_step_automated_all(self):
         self._do_next_clean_step_all()
@@ -4332,64 +4329,11 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin, db_base.DbTestCase):
     def test_do_next_clean_step_manual_all(self):
         self._do_next_clean_step_all(manual=True)
 
-    @mock.patch('ironic.drivers.utils.collect_ramdisk_logs', autospec=True)
-    @mock.patch('ironic.drivers.modules.fake.FakePower.execute_clean_step',
-                autospec=True)
-    @mock.patch('ironic.drivers.modules.fake.FakeDeploy.execute_clean_step',
-                autospec=True)
-    def test_do_next_clean_step_collect_logs(self, mock_deploy_execute,
-                                             mock_power_execute,
-                                             mock_collect_logs):
-        CONF.set_override('deploy_logs_collect', 'always', group='agent')
-        # Run all steps from start to finish (all synchronous)
-        tgt_prov_state = states.MANAGEABLE
-
-        self._start_service()
-        node = obj_utils.create_test_node(
-            self.context, driver='fake-hardware',
-            provision_state=states.CLEANING,
-            target_provision_state=tgt_prov_state,
-            last_error=None,
-            driver_internal_info={'clean_steps': self.clean_steps,
-                                  'clean_step_index': None},
-            clean_step={})
-
-        def fake_deploy(conductor_obj, task, step):
-            driver_internal_info = task.node.driver_internal_info
-            driver_internal_info['goober'] = 'test'
-            task.node.driver_internal_info = driver_internal_info
-            task.node.save()
-
-        mock_deploy_execute.side_effect = fake_deploy
-        mock_power_execute.return_value = None
-
-        with task_manager.acquire(
-                self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, 0)
-
-        self._stop_service()
-        node.refresh()
-
-        # Cleaning should be complete
-        self.assertEqual(tgt_prov_state, node.provision_state)
-        self.assertEqual(states.NOSTATE, node.target_provision_state)
-        self.assertEqual({}, node.clean_step)
-        self.assertNotIn('clean_step_index', node.driver_internal_info)
-        self.assertEqual('test', node.driver_internal_info['goober'])
-        self.assertIsNone(node.driver_internal_info['clean_steps'])
-        mock_power_execute.assert_called_once_with(mock.ANY, mock.ANY,
-                                                   self.clean_steps[1])
-        mock_deploy_execute.assert_has_calls(
-            [mock.call(mock.ANY, mock.ANY, self.clean_steps[0]),
-             mock.call(mock.ANY, mock.ANY, self.clean_steps[2])])
-        mock_collect_logs.assert_called_once_with(mock.ANY, label='cleaning')
-
-    @mock.patch('ironic.drivers.utils.collect_ramdisk_logs', autospec=True)
     @mock.patch('ironic.drivers.modules.fake.FakeDeploy.execute_clean_step',
                 autospec=True)
     @mock.patch.object(fake.FakeDeploy, 'tear_down_cleaning', autospec=True)
     def _do_next_clean_step_execute_fail(self, tear_mock, mock_execute,
-                                         mock_collect_logs, manual=False):
+                                         manual=False):
         # When a clean step fails, go to CLEANFAIL
         tgt_prov_state = states.MANAGEABLE if manual else states.AVAILABLE
 
@@ -4421,7 +4365,6 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin, db_base.DbTestCase):
         self.assertTrue(node.maintenance)
         mock_execute.assert_called_once_with(
             mock.ANY, mock.ANY, self.clean_steps[0])
-        mock_collect_logs.assert_called_once_with(mock.ANY, label='cleaning')
 
     def test__do_next_clean_step_automated_execute_fail(self):
         self._do_next_clean_step_execute_fail()
@@ -5616,15 +5559,6 @@ class DestroyNodeTestCase(mgr_utils.ServiceSetUpMixin, db_base.DbTestCase):
                                           provision_state=states.ADOPTFAIL)
         self.service.destroy_node(self.context, node.uuid)
         self.assertFalse(mock_power.called)
-
-    def test_destroy_node_broken_driver(self):
-        node = obj_utils.create_test_node(self.context,
-                                          power_interface='broken')
-        self._start_service()
-        self.service.destroy_node(self.context, node.uuid)
-        self.assertRaises(exception.NodeNotFound,
-                          self.dbapi.get_node_by_uuid,
-                          node.uuid)
 
 
 @mgr_utils.mock_record_keepalive
@@ -7608,8 +7542,7 @@ class ManagerTestProperties(mgr_utils.ServiceSetUpMixin, db_base.DbTestCase):
                     'force_persistent_boot_device', 'ipmi_protocol_version',
                     'ipmi_force_boot_device', 'deploy_forces_oob_reboot',
                     'rescue_kernel', 'rescue_ramdisk',
-                    'ipmi_disable_boot_timeout', 'ipmi_hex_kg_key',
-                    'ipmi_cipher_suite']
+                    'ipmi_disable_boot_timeout', 'ipmi_hex_kg_key']
         self._check_driver_properties("ipmi", expected)
 
     def test_driver_properties_snmp(self):

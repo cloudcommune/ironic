@@ -19,7 +19,6 @@ from oslo_utils import importutils
 from ironic.common import exception
 from ironic.common import states
 from ironic.conductor import task_manager
-from ironic.drivers.modules.redfish import management as redfish_mgmt
 from ironic.drivers.modules.redfish import power as redfish_power
 from ironic.drivers.modules.redfish import utils as redfish_utils
 from ironic.tests.unit.db import base as db_base
@@ -83,21 +82,19 @@ class RedfishPowerTestCase(db_base.DbTestCase):
                 mock_get_system.assert_called_once_with(task.node)
                 mock_get_system.reset_mock()
 
-    @mock.patch.object(redfish_mgmt.RedfishManagement, 'restore_boot_device',
-                       autospec=True)
     @mock.patch.object(redfish_utils, 'get_system', autospec=True)
-    def test_set_power_state(self, mock_get_system, mock_restore_bootdev):
+    def test_set_power_state(self, mock_get_system):
         with task_manager.acquire(self.context, self.node.uuid,
                                   shared=False) as task:
             expected_values = [
-                (states.POWER_ON, sushy.RESET_ON, True),
-                (states.POWER_OFF, sushy.RESET_FORCE_OFF, False),
-                (states.REBOOT, sushy.RESET_FORCE_RESTART, True),
-                (states.SOFT_REBOOT, sushy.RESET_GRACEFUL_RESTART, True),
-                (states.SOFT_POWER_OFF, sushy.RESET_GRACEFUL_SHUTDOWN, False)
+                (states.POWER_ON, sushy.RESET_ON),
+                (states.POWER_OFF, sushy.RESET_FORCE_OFF),
+                (states.REBOOT, sushy.RESET_FORCE_RESTART),
+                (states.SOFT_REBOOT, sushy.RESET_GRACEFUL_RESTART),
+                (states.SOFT_POWER_OFF, sushy.RESET_GRACEFUL_SHUTDOWN)
             ]
 
-            for target, expected, restore_bootdev in expected_values:
+            for target, expected in expected_values:
                 if target in (states.POWER_OFF, states.SOFT_POWER_OFF):
                     final = sushy.SYSTEM_POWER_STATE_OFF
                     transient = sushy.SYSTEM_POWER_STATE_ON
@@ -116,15 +113,9 @@ class RedfishPowerTestCase(db_base.DbTestCase):
                 system_result[0].reset_system.assert_called_once_with(expected)
                 mock_get_system.assert_called_with(task.node)
                 self.assertEqual(4, mock_get_system.call_count)
-                if restore_bootdev:
-                    mock_restore_bootdev.assert_called_once_with(
-                        task.driver.management, task, system_result[0])
-                else:
-                    self.assertFalse(mock_restore_bootdev.called)
 
                 # Reset mocks
                 mock_get_system.reset_mock()
-                mock_restore_bootdev.reset_mock()
 
     @mock.patch.object(redfish_utils, 'get_system', autospec=True)
     def test_set_power_state_not_reached(self, mock_get_system):
@@ -167,66 +158,41 @@ class RedfishPowerTestCase(db_base.DbTestCase):
         with task_manager.acquire(self.context, self.node.uuid,
                                   shared=False) as task:
             self.assertRaisesRegex(
-                exception.RedfishError, 'power on failed',
+                exception.RedfishError, 'Redfish set power state',
                 task.driver.power.set_power_state, task, states.POWER_ON)
             fake_system.reset_system.assert_called_once_with(
                 sushy.RESET_ON)
             mock_get_system.assert_called_once_with(task.node)
 
-    @mock.patch.object(redfish_mgmt.RedfishManagement, 'restore_boot_device',
-                       autospec=True)
     @mock.patch.object(redfish_utils, 'get_system', autospec=True)
-    def test_reboot_from_power_off(self, mock_get_system,
-                                   mock_restore_bootdev):
+    def test_reboot(self, mock_get_system):
         with task_manager.acquire(self.context, self.node.uuid,
                                   shared=False) as task:
-            system_result = [
-                # Initial state
-                mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_OFF),
-                # Transient state - still powered off
-                mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_OFF),
-                # Final state - down powering off
-                mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_ON)
+            expected_values = [
+                (sushy.SYSTEM_POWER_STATE_ON, sushy.RESET_FORCE_RESTART),
+                (sushy.SYSTEM_POWER_STATE_OFF, sushy.RESET_ON)
             ]
-            mock_get_system.side_effect = system_result
 
-            task.driver.power.reboot(task)
+            for current, expected in expected_values:
+                system_result = [
+                    # Initial state
+                    mock.Mock(power_state=current),
+                    # Transient state - powering off
+                    mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_OFF),
+                    # Final state - down powering off
+                    mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_ON)
+                ]
+                mock_get_system.side_effect = system_result
 
-            # Asserts
-            system_result[0].reset_system.assert_called_once_with(
-                sushy.RESET_ON)
-            mock_get_system.assert_called_with(task.node)
-            self.assertEqual(3, mock_get_system.call_count)
-            mock_restore_bootdev.assert_called_once_with(
-                task.driver.management, task, system_result[0])
+                task.driver.power.reboot(task)
 
-    @mock.patch.object(redfish_mgmt.RedfishManagement, 'restore_boot_device',
-                       autospec=True)
-    @mock.patch.object(redfish_utils, 'get_system', autospec=True)
-    def test_reboot_from_power_on(self, mock_get_system, mock_restore_bootdev):
-        with task_manager.acquire(self.context, self.node.uuid,
-                                  shared=False) as task:
-            system_result = [
-                # Initial state
-                mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_ON),
-                # Transient state - powering off
-                mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_OFF),
-                # Final state - down powering off
-                mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_ON)
-            ]
-            mock_get_system.side_effect = system_result
+                # Asserts
+                system_result[0].reset_system.assert_called_once_with(expected)
+                mock_get_system.assert_called_with(task.node)
+                self.assertEqual(3, mock_get_system.call_count)
 
-            task.driver.power.reboot(task)
-
-            # Asserts
-            system_result[0].reset_system.assert_has_calls([
-                mock.call(sushy.RESET_FORCE_OFF),
-                mock.call(sushy.RESET_ON),
-            ])
-            mock_get_system.assert_called_with(task.node)
-            self.assertEqual(3, mock_get_system.call_count)
-            mock_restore_bootdev.assert_called_once_with(
-                task.driver.management, task, system_result[0])
+                # Reset mocks
+                mock_get_system.reset_mock()
 
     @mock.patch.object(redfish_utils, 'get_system', autospec=True)
     def test_reboot_not_reached(self, mock_get_system):
@@ -253,40 +219,11 @@ class RedfishPowerTestCase(db_base.DbTestCase):
                                   shared=False) as task:
             fake_system.power_state = sushy.SYSTEM_POWER_STATE_ON
             self.assertRaisesRegex(
-                exception.RedfishError, 'Reboot failed.*power off',
+                exception.RedfishError, 'Redfish reboot failed',
                 task.driver.power.reboot, task)
             fake_system.reset_system.assert_called_once_with(
-                sushy.RESET_FORCE_OFF)
+                sushy.RESET_FORCE_RESTART)
             mock_get_system.assert_called_once_with(task.node)
-
-    @mock.patch.object(sushy, 'Sushy', autospec=True)
-    @mock.patch.object(redfish_utils, 'get_system', autospec=True)
-    def test_reboot_fail_on_power_on(self, mock_get_system, mock_sushy):
-        system_result = [
-            # Initial state
-            mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_ON),
-            # Transient state - powering off
-            mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_OFF),
-            # Final state - down powering off
-            mock.Mock(power_state=sushy.SYSTEM_POWER_STATE_ON)
-        ]
-        mock_get_system.side_effect = system_result
-        fake_system = system_result[0]
-        fake_system.reset_system.side_effect = [
-            None,
-            sushy.exceptions.SushyError(),
-        ]
-
-        with task_manager.acquire(self.context, self.node.uuid,
-                                  shared=False) as task:
-            self.assertRaisesRegex(
-                exception.RedfishError, 'Reboot failed.*power on',
-                task.driver.power.reboot, task)
-            fake_system.reset_system.assert_has_calls([
-                mock.call(sushy.RESET_FORCE_OFF),
-                mock.call(sushy.RESET_ON),
-            ])
-            mock_get_system.assert_called_with(task.node)
 
     def test_get_supported_power_states(self):
         with task_manager.acquire(self.context, self.node.uuid,

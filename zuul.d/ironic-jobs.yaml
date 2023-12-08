@@ -40,10 +40,10 @@
         IRONIC_RAMDISK_TYPE: tinyipa
         IRONIC_TEMPEST_BUILD_TIMEOUT: 720
         IRONIC_TEMPEST_WHOLE_DISK_IMAGE: False
-        IRONIC_VM_COUNT: 2
+        IRONIC_VM_COUNT: 1
         IRONIC_VM_EPHEMERAL_DISK: 1
-        IRONIC_VM_SPECS_RAM: 512
         IRONIC_VM_LOG_DIR: '{{ devstack_base_dir }}/ironic-bm-logs'
+        IRONIC_VM_SPECS_RAM: 384
         # NOTE(dtantsur): in some jobs we end up with 12 disks total, so reduce
         # each of them. For don't need all 10 GiB for CirrOS anyway.
         IRONIC_VM_SPECS_DISK: 4
@@ -98,7 +98,7 @@
       - ^tox.ini$
     vars:
       tempest_test_regex: ironic_standalone
-      tempest_concurrency: 2
+      tempest_concurrency: 3
       devstack_localrc:
         FORCE_CONFIG_DRIVE: False
         IRONIC_AUTOMATED_CLEAN_ENABLED: False
@@ -107,7 +107,7 @@
         IRONIC_ENABLED_DEPLOY_INTERFACES: "iscsi,direct,ansible"
         IRONIC_ENABLED_RESCUE_INTERFACES: "fake,agent,no-rescue"
         IRONIC_RPC_TRANSPORT: json-rpc
-        IRONIC_VM_COUNT: 4
+        IRONIC_VM_COUNT: 6
         IRONIC_VM_VOLUME_COUNT: 2
         # We're using a lot of disk space in this job. Some testing nodes have
         # a small root partition, so use /opt which is mounted from a bigger
@@ -140,8 +140,6 @@
       devstack_localrc:
         IRONIC_DEPLOY_DRIVER: redfish
         IRONIC_ENABLED_HARDWARE_TYPES: redfish
-        IRONIC_VM_COUNT: 2
-        IRONIC_AUTOMATED_CLEAN_ENABLED: False
 
 - job:
     name: ironic-tempest-pxe_ipmitool-postgres
@@ -157,7 +155,7 @@
 
 - job:
     name: ironic-tempest-ipa-wholedisk-bios-agent_ipmitool-tinyipa
-    description: ironic-tempest-ipa-wholedisk-bios-agent_ipmitool-tinyipa that also tests cleaning.
+    description: ironic-tempest-ipa-wholedisk-bios-agent_ipmitool-tinyipa
     parent: ironic-base
     timeout: 5400
     vars:
@@ -165,7 +163,6 @@
         IRONIC_DEFAULT_DEPLOY_INTERFACE: direct
         IRONIC_DEFAULT_RESCUE_INTERFACE: agent
         IRONIC_ENABLED_RESCUE_INTERFACES: "fake,agent,no-rescue"
-        IRONIC_VM_COUNT: 2
         IRONIC_TEMPEST_WHOLE_DISK_IMAGE: True
         IRONIC_VM_EPHEMERAL_DISK: 0
         SWIFT_ENABLE_TEMPURLS: True
@@ -202,13 +199,12 @@
 
 - job:
     name: ironic-tempest-ipa-partition-pxe_ipmitool-tinyipa-python3
-    description: ironic-tempest-ipa-partition-pxe_ipmitool-tinyipa-python3 that also tests cleaning.
+    description: ironic-tempest-ipa-partition-pxe_ipmitool-tinyipa-python3
     parent: ironic-base
     timeout: 5400
     vars:
       devstack_localrc:
         USE_PYTHON3: True
-        IRONIC_AUTOMATED_CLEAN_ENABLED: True
 
 - job:
     name: ironic-tempest-bfv
@@ -252,7 +248,6 @@
         IRONIC_AUTOMATED_CLEAN_ENABLED: False
         SWIFT_ENABLE_TEMPURLS: True
         SWIFT_TEMPURL_KEY: secretkey
-        IRONIC_VM_COUNT: 1
       devstack_plugins:
         ironic-inspector: https://opendev.org/openstack/ironic-inspector
       devstack_services:
@@ -361,8 +356,8 @@
       - zuul: opendev.org/zuul/zuul-jobs
     vars:
       tox_envlist: all
-      tempest_concurrency: 3
-      tempest_test_regex: "ironic_tempest_plugin.tests.scenario"
+      tempest_concurrency: 4
+      tempest_test_regex: "(ironic_tempest_plugin.tests.scenario|test_schedule_to_all_nodes)"
       tempest_test_timeout: 2400
       devstack_localrc:
         BUILD_TIMEOUT: 1200
@@ -392,10 +387,10 @@
         IRONIC_TEMPEST_BUILD_TIMEOUT: 600
         IRONIC_TEMPEST_WHOLE_DISK_IMAGE: True
         IRONIC_USE_LINK_LOCAL: True
-        IRONIC_VM_COUNT: 3
+        IRONIC_VM_COUNT: 7
         IRONIC_VM_EPHEMERAL_DISK: 0
         IRONIC_VM_LOG_DIR: '{{ devstack_base_dir }}/ironic-bm-logs'
-        IRONIC_VM_SPECS_RAM: 512
+        IRONIC_VM_SPECS_RAM: 384
         IRONIC_VM_SPECS_DISK: 4
         OVS_BRIDGE_MAPPINGS: 'mynetwork:brbm,public:br-infra'
         OVS_PHYSICAL_BRIDGE: brbm
@@ -467,12 +462,11 @@
           IRONIC_PROVISION_NETWORK_NAME: ironic-provision
           IRONIC_RAMDISK_TYPE: tinyipa
           IRONIC_USE_LINK_LOCAL: True
-          IRONIC_VM_COUNT: 3
+          IRONIC_VM_COUNT: 7
           IRONIC_VM_EPHEMERAL_DISK: 0
           IRONIC_VM_LOG_DIR: '{{ devstack_base_dir }}/ironic-bm-logs'
           IRONIC_VM_NETWORK_BRIDGE: sub1brbm
-          IRONIC_VM_SPECS_RAM: 512
-          IRONIC_VM_SPECS_DISK: 4
+          IRONIC_VM_SPECS_RAM: 384
           OVS_BRIDGE_MAPPINGS: 'mynetwork:sub1brbm,public:br-infra'
           OVS_PHYSICAL_BRIDGE: sub1brbm
           PHYSICAL_NETWORK: mynetwork

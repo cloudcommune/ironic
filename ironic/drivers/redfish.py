@@ -17,7 +17,6 @@ from ironic.drivers import generic
 from ironic.drivers.modules import inspector
 from ironic.drivers.modules import ipxe
 from ironic.drivers.modules import noop
-from ironic.drivers.modules import noop_mgmt
 from ironic.drivers.modules import pxe
 from ironic.drivers.modules.redfish import bios as redfish_bios
 from ironic.drivers.modules.redfish import boot as redfish_boot
@@ -37,7 +36,7 @@ class RedfishHardware(generic.GenericHardware):
     @property
     def supported_management_interfaces(self):
         """List of supported management interfaces."""
-        return [redfish_mgmt.RedfishManagement, noop_mgmt.NoopManagement]
+        return [redfish_mgmt.RedfishManagement]
 
     @property
     def supported_power_interfaces(self):

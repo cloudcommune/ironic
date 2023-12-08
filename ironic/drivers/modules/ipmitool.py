@@ -110,11 +110,6 @@ OPTIONAL_PROPERTIES = {
                                    '[ipmi]disable_boot_timeout will be '
                                    'used if this option is not set. '
                                    'Optional.'),
-    'ipmi_cipher_suite': _('The number of a cipher suite to use. Only 3 '
-                           '(AES-128 with SHA1) or 17 (AES-128 with SHA256) '
-                           'should ever be used; 17 is preferred. The '
-                           'default value depends on the ipmitool version, '
-                           'some recent versions have switched from 3 to 17.'),
 }
 COMMON_PROPERTIES = REQUIRED_PROPERTIES.copy()
 COMMON_PROPERTIES.update(OPTIONAL_PROPERTIES)
@@ -302,7 +297,6 @@ def _parse_driver_info(node):
     target_address = info.get('ipmi_target_address')
     protocol_version = str(info.get('ipmi_protocol_version', '2.0'))
     force_boot_device = info.get('ipmi_force_boot_device', False)
-    cipher_suite = info.get('ipmi_cipher_suite')
 
     if not username:
         LOG.warning('ipmi_username is not defined or empty for node %s: '
@@ -375,16 +369,6 @@ def _parse_driver_info(node):
         raise exception.InvalidParameterValue(_(
             "Number of ipmi_hex_kg_key characters is not even"))
 
-    if cipher_suite is not None:
-        try:
-            int(cipher_suite)
-        except (TypeError, ValueError):
-            raise exception.InvalidParameterValue(_(
-                "Invalid cipher suite %s, expected a number") % cipher_suite)
-        if protocol_version == '1.5':
-            raise exception.InvalidParameterValue(_(
-                "Cipher suites cannot be used with IPMI 1.5"))
-
     return {
         'address': address,
         'dest_port': dest_port,
@@ -401,7 +385,6 @@ def _parse_driver_info(node):
         'target_address': target_address,
         'protocol_version': protocol_version,
         'force_boot_device': force_boot_device,
-        'cipher_suite': cipher_suite,
     }
 
 
@@ -441,13 +424,17 @@ def _get_ipmitool_args(driver_info, pw_file=None):
             '-L', driver_info['priv_level']
             ]
 
-    for field, arg in [('dest_port', '-p'),
-                       ('username', '-U'),
-                       ('hex_kg_key', '-y'),
-                       ('cipher_suite', '-C')]:
-        if driver_info[field]:
-            args.append(arg)
-            args.append(driver_info[field])
+    if driver_info['dest_port']:
+        args.append('-p')
+        args.append(driver_info['dest_port'])
+
+    if driver_info['username']:
+        args.append('-U')
+        args.append(driver_info['username'])
+
+    if driver_info['hex_kg_key']:
+        args.append('-y')
+        args.append(driver_info['hex_kg_key'])
 
     for name, option in BRIDGING_OPTIONS:
         if driver_info[name] is not None:
@@ -458,7 +445,7 @@ def _get_ipmitool_args(driver_info, pw_file=None):
         args.append('-f')
         args.append(pw_file)
 
-    if CONF.ipmi.debug:
+    if CONF.debug:
         args.append('-v')
 
     # ensure all arguments are strings
@@ -492,10 +479,7 @@ def _exec_ipmitool(driver_info, command, check_exit_code=None,
 
     if _is_option_supported('timing'):
         args.append('-R')
-        if CONF.ipmi.use_ipmitool_retries:
-            args.append(str(num_tries))
-        else:
-            args.append('1')
+        args.append(str(num_tries))
 
         args.append('-N')
         args.append(str(CONF.ipmi.min_command_interval))
@@ -545,12 +529,9 @@ def _exec_ipmitool(driver_info, command, check_exit_code=None,
                             IPMITOOL_RETRYABLE_FAILURES +
                             CONF.ipmi.additional_retryable_ipmi_errors)
                         if x in six.text_type(e)]
-                    # If Ironic is doing retries then retry all errors
-                    retry_failures = (err_list
-                                      or not CONF.ipmi.use_ipmitool_retries)
                     if ((time.time() > end_time)
                         or (num_tries == 0)
-                        or not retry_failures):
+                        or not err_list):
                         LOG.error('IPMI Error while attempting "%(cmd)s" '
                                   'for node %(node)s. Error: %(error)s',
                                   {'node': driver_info['uuid'],
@@ -1387,6 +1368,13 @@ class IPMIShellinaboxConsole(IPMIConsole):
         :raises: ConsoleSubprocessFailed when invoking the subprocess failed
         """
         driver_info = _parse_driver_info(task.node)
+        try:
+            self._exec_stop_console(driver_info)
+        except OSError:
+            # We need to drop any existing sol sessions with sol deactivate.
+            # OSError is raised when sol session is already deactivated,
+            # so we can ignore it.
+            pass
         self._start_console(driver_info,
                             console_utils.start_shellinabox_console)
 
@@ -1397,16 +1385,29 @@ class IPMIShellinaboxConsole(IPMIConsole):
         :param task: a task from TaskManager
         :raises: ConsoleError if unable to stop the console
         """
+        driver_info = _parse_driver_info(task.node)
         try:
             console_utils.stop_shellinabox_console(task.node.uuid)
         finally:
             ironic_utils.unlink_without_raise(
                 _console_pwfile_path(task.node.uuid))
+        self._exec_stop_console(driver_info)
+
+    def _exec_stop_console(self, driver_info):
+        cmd = "sol deactivate"
+        _exec_ipmitool(driver_info, cmd, check_exit_code=[0, 1])
 
     @METRICS.timer('IPMIShellinaboxConsole.get_console')
     def get_console(self, task):
         """Get the type and connection information about the console."""
         driver_info = _parse_driver_info(task.node)
+        try:
+            self._exec_stop_console(driver_info)
+        except OSError:
+            # We need to drop any existing sol sessions with sol deactivate.
+            # OSError is raised when sol session is already deactivated,
+            # so we can ignore it.
+            pass
         url = console_utils.get_shellinabox_console_url(driver_info['port'])
         return {'type': 'shellinabox', 'url': url}
 
@@ -1462,5 +1463,12 @@ class IPMISocatConsole(IPMIConsole):
         :param task: a task from TaskManager
         """
         driver_info = _parse_driver_info(task.node)
+        try:
+            self._exec_stop_console(driver_info)
+        except OSError:
+            # We need to drop any existing sol sessions with sol deactivate.
+            # OSError is raised when sol session is already deactivated,
+            # so we can ignore it.
+            pass
         url = console_utils.get_socat_console_url(driver_info['port'])
         return {'type': 'socat', 'url': url}

@@ -460,7 +460,6 @@ class Base(db_base.DbTestCase):
                     enabled_console_interfaces=['fake', 'ipmitool-socat',
                                                 'ipmitool-shellinabox',
                                                 'no-console'])
-        self.config(debug=True, group="ipmi")
         self.node = obj_utils.create_test_node(
             self.context,
             console_interface='ipmitool-socat',
@@ -807,28 +806,6 @@ class IPMIToolPrivateMethodTestCase(Base):
         ret = ipmi._parse_driver_info(node)
         self.assertEqual(623, ret['dest_port'])
 
-    def test__parse_driver_info_ipmi_cipher_suite(self):
-        info = dict(INFO_DICT)
-        info['ipmi_cipher_suite'] = 0  # absolute power!
-        node = obj_utils.get_test_node(self.context, driver_info=info)
-        ret = ipmi._parse_driver_info(node)
-        self.assertEqual(0, ret['cipher_suite'])
-
-    def test__parse_driver_info_ipmi_cipher_suite_not_a_number(self):
-        info = dict(INFO_DICT)
-        info['ipmi_cipher_suite'] = 'I can haz accez'
-        node = obj_utils.get_test_node(self.context, driver_info=info)
-        self.assertRaises(exception.InvalidParameterValue,
-                          ipmi._parse_driver_info, node)
-
-    def test__parse_driver_info_ipmi_cipher_suite_ipmi_1_5(self):
-        info = dict(INFO_DICT)
-        info['ipmi_cipher_suite'] = 0
-        info['ipmi_protocol_version'] = '1.5'
-        node = obj_utils.get_test_node(self.context, driver_info=info)
-        self.assertRaises(exception.InvalidParameterValue,
-                          ipmi._parse_driver_info, node)
-
     @mock.patch.object(ipmi.LOG, 'warning', spec_set=True, autospec=True)
     def test__parse_driver_info_undefined_credentials(self, mock_log):
         info = dict(INFO_DICT)
@@ -1047,63 +1024,6 @@ class IPMIToolPrivateMethodTestCase(Base):
 
         mock_support.assert_called_once_with('timing')
         mock_exec.assert_called_once_with(*args)
-
-    @mock.patch.object(ipmi, '_is_option_supported', autospec=True)
-    @mock.patch.object(ipmi, '_make_password_file', _make_password_file_stub)
-    @mock.patch.object(utils, 'execute', autospec=True)
-    def test__exec_ipmitool_with_ironic_retries(
-            self, mock_exec, mock_support):
-        args = [
-            'ipmitool',
-            '-I', 'lanplus',
-            '-H', self.info['address'],
-            '-L', self.info['priv_level'],
-            '-U', self.info['username'],
-            '-v',
-            '-R', '1',
-            '-N', '5',
-            '-f', awesome_password_filename,
-            'A', 'B', 'C',
-        ]
-
-        mock_support.return_value = True
-        mock_exec.return_value = (None, None)
-
-        self.config(use_ipmitool_retries=False, group='ipmi')
-
-        ipmi._exec_ipmitool(self.info, 'A B C')
-
-        mock_support.assert_called_once_with('timing')
-        mock_exec.assert_called_once_with(*args)
-
-    @mock.patch.object(ipmi, '_is_option_supported', autospec=True)
-    @mock.patch.object(ipmi, '_make_password_file', _make_password_file_stub)
-    @mock.patch.object(utils, 'execute', autospec=True)
-    def test__exec_ipmitool_with_ironic_retries_multiple(
-            self, mock_exec, mock_support):
-
-        mock_exec.side_effect = [
-            processutils.ProcessExecutionError(
-                stderr="Unknown"
-            ),
-            processutils.ProcessExecutionError(
-                stderr="Unknown"
-            ),
-            processutils.ProcessExecutionError(
-                stderr="Unknown"
-            ),
-        ]
-
-        self.config(min_command_interval=1, group='ipmi')
-        self.config(command_retry_timeout=3, group='ipmi')
-        self.config(use_ipmitool_retries=False, group='ipmi')
-
-        self.assertRaises(processutils.ProcessExecutionError,
-                          ipmi._exec_ipmitool,
-                          self.info, 'A B C')
-
-        mock_support.assert_called_once_with('timing')
-        self.assertEqual(3, mock_exec.call_count)
 
     def test__exec_ipmitool_wait(self):
         mock_popen = mock.MagicMock()
@@ -1353,33 +1273,6 @@ class IPMIToolPrivateMethodTestCase(Base):
             '-L', self.info['priv_level'],
             '-p', '1623',
             '-U', self.info['username'],
-            '-v',
-            '-f', awesome_password_filename,
-            'A', 'B', 'C',
-        ]
-
-        mock_support.return_value = False
-        mock_exec.return_value = (None, None)
-
-        ipmi._exec_ipmitool(self.info, 'A B C')
-
-        mock_support.assert_called_once_with('timing')
-        mock_exec.assert_called_once_with(*args)
-        self.assertFalse(self.mock_sleep.called)
-
-    @mock.patch.object(ipmi, '_is_option_supported', autospec=True)
-    @mock.patch.object(ipmi, '_make_password_file', _make_password_file_stub)
-    @mock.patch.object(utils, 'execute', autospec=True)
-    def test__exec_ipmitool_cipher_suite(self, mock_exec, mock_support):
-        self.info['cipher_suite'] = '3'
-        ipmi.LAST_CMD_TIME = {}
-        args = [
-            'ipmitool',
-            '-I', 'lanplus',
-            '-H', self.info['address'],
-            '-L', self.info['priv_level'],
-            '-U', self.info['username'],
-            '-C', '3',
             '-v',
             '-f', awesome_password_filename,
             'A', 'B', 'C',
@@ -2682,7 +2575,7 @@ class IPMIToolShellinaboxTestCase(db_base.DbTestCase):
             ipmi_cmd = self.console._get_ipmi_cmd(driver_info, 'pw_file')
             expected_ipmi_cmd = ("/:%(uid)s:%(gid)s:HOME:ipmitool "
                                  "-I lanplus -H %(address)s -L ADMINISTRATOR "
-                                 "-U %(user)s -f pw_file" %
+                                 "-U %(user)s -f pw_file -v" %
                                  {'uid': os.getuid(), 'gid': os.getgid(),
                                   'address': driver_info['address'],
                                   'user': driver_info['username']})
@@ -2696,7 +2589,7 @@ class IPMIToolShellinaboxTestCase(db_base.DbTestCase):
             ipmi_cmd = self.console._get_ipmi_cmd(driver_info, 'pw_file')
             expected_ipmi_cmd = ("/:%(uid)s:%(gid)s:HOME:ipmitool "
                                  "-I lanplus -H %(address)s -L ADMINISTRATOR "
-                                 "-f pw_file" %
+                                 "-f pw_file -v" %
                                  {'uid': os.getuid(), 'gid': os.getgid(),
                                   'address': driver_info['address']})
         self.assertEqual(expected_ipmi_cmd, ipmi_cmd)
@@ -2830,7 +2723,7 @@ class IPMIToolSocatDriverTestCase(IPMIToolShellinaboxTestCase):
             ipmi_cmd = self.console._get_ipmi_cmd(driver_info, 'pw_file')
             expected_ipmi_cmd = ("ipmitool -I lanplus -H %(address)s "
                                  "-L ADMINISTRATOR -U %(user)s "
-                                 "-f pw_file" %
+                                 "-f pw_file -v" %
                                  {'address': driver_info['address'],
                                   'user': driver_info['username']})
         self.assertEqual(expected_ipmi_cmd, ipmi_cmd)
@@ -2843,7 +2736,7 @@ class IPMIToolSocatDriverTestCase(IPMIToolShellinaboxTestCase):
             ipmi_cmd = self.console._get_ipmi_cmd(driver_info, 'pw_file')
             expected_ipmi_cmd = ("ipmitool -I lanplus -H %(address)s "
                                  "-L ADMINISTRATOR "
-                                 "-f pw_file" %
+                                 "-f pw_file -v" %
                                  {'address': driver_info['address']})
         self.assertEqual(expected_ipmi_cmd, ipmi_cmd)
 

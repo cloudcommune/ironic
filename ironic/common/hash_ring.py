@@ -29,11 +29,12 @@ LOG = log.getLogger(__name__)
 
 
 class HashRingManager(object):
-    _hash_rings = (None, 0)
+    _hash_rings = None
     _lock = threading.Lock()
 
     def __init__(self, use_groups=True, cache=True):
         self.dbapi = dbapi.get_instance()
+        self.updated_at = time.time()
         self.use_groups = use_groups
         self.cache = cache
 
@@ -47,19 +48,19 @@ class HashRingManager(object):
 
         # Hot path, no lock. Using a local variable to avoid races with code
         # changing the class variable.
-        hash_rings, updated_at = self.__class__._hash_rings
-        if hash_rings is not None and updated_at >= limit:
+        hash_rings = self.__class__._hash_rings
+        if hash_rings is not None and self.updated_at >= limit:
             return hash_rings
 
         with self._lock:
-            hash_rings, updated_at = self.__class__._hash_rings
-            if hash_rings is None or updated_at < limit:
+            if self.__class__._hash_rings is None or self.updated_at < limit:
                 LOG.debug('Rebuilding cached hash rings')
-                hash_rings = self._load_hash_rings()
-                self.__class__._hash_rings = hash_rings, time.time()
+                rings = self._load_hash_rings()
+                self.__class__._hash_rings = rings
+                self.updated_at = time.time()
                 LOG.debug('Finished rebuilding hash rings, available drivers '
-                          'are %s', ', '.join(hash_rings))
-            return hash_rings
+                          'are %s', ', '.join(rings))
+            return self.__class__._hash_rings
 
     def _load_hash_rings(self):
         rings = {}
@@ -76,7 +77,7 @@ class HashRingManager(object):
     def reset(cls):
         with cls._lock:
             LOG.debug('Resetting cached hash rings')
-            cls._hash_rings = (None, 0)
+            cls._hash_rings = None
 
     def get_ring(self, driver_name, conductor_group):
         try:
@@ -94,14 +95,13 @@ class HashRingManager(object):
 
     def _get_ring(self, driver_name, conductor_group):
         # There are no conductors, temporary failure - 503 Service Unavailable
-        ring = self.ring  # a property, don't load twice
-        if not ring:
+        if not self.ring:
             raise exception.TemporaryFailure()
 
         try:
             if self.use_groups:
-                return ring['%s:%s' % (conductor_group, driver_name)]
-            return ring[driver_name]
+                return self.ring['%s:%s' % (conductor_group, driver_name)]
+            return self.ring[driver_name]
         except KeyError:
             raise exception.DriverNotFound(
                 _("The driver '%s' is unknown.") % driver_name)

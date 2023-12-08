@@ -983,9 +983,9 @@ class Connection(api.Connection):
         nodes = []
         with _session_for_write():
             query = (model_query(models.Node)
-                     .filter(models.Node.reservation.ilike(hostname)))
+                     .filter_by(reservation=hostname))
             nodes = [node['uuid'] for node in query]
-            query.update({'reservation': None}, synchronize_session=False)
+            query.update({'reservation': None})
 
         if nodes:
             nodes = ', '.join(nodes)
@@ -998,14 +998,13 @@ class Connection(api.Connection):
         nodes = []
         with _session_for_write():
             query = (model_query(models.Node)
-                     .filter(models.Node.reservation.ilike(hostname)))
+                     .filter_by(reservation=hostname))
             query = query.filter(models.Node.target_power_state != sql.null())
             nodes = [node['uuid'] for node in query]
             query.update({'target_power_state': None,
                           'last_error': _("Pending power operation was "
                                           "aborted due to conductor "
-                                          "restart")},
-                         synchronize_session=False)
+                                          "restart")})
 
         if nodes:
             nodes = ', '.join(nodes)
@@ -1495,12 +1494,12 @@ class Connection(api.Connection):
             per-node trait limit.
         """
         if num_traits > MAX_TRAITS_PER_NODE:
-            msg = (_("Could not modify traits for node %(node_id)s as it "
-                     "would exceed the maximum number of traits per node "
-                     "(%(num_traits)d vs. %(max_traits)d)")
-                   % {'node_id': node_id, 'num_traits': num_traits,
-                      'max_traits': MAX_TRAITS_PER_NODE})
-            raise exception.InvalidParameterValue(err=msg)
+            msg = _("Could not modify traits for node %(node_id)s as it would "
+                    "exceed the maximum number of traits per node "
+                    "(%(num_traits)d vs. %(max_traits)d)")
+            raise exception.InvalidParameterValue(
+                msg, node_id=node_id, num_traits=num_traits,
+                max_traits=MAX_TRAITS_PER_NODE)
 
     @oslo_db_api.retry_on_deadlock
     def set_node_traits(self, node_id, traits, version):

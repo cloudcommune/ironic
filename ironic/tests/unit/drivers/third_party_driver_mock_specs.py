@@ -31,8 +31,7 @@ DRACCLIENT_CONSTANTS_MOD_SPEC = (
     'POWER_OFF',
     'POWER_ON',
     'REBOOT',
-    'RebootRequired',
-    'RaidStatus'
+    'RebootRequired'
 )
 
 DRACCLIENT_CONSTANTS_REBOOT_REQUIRED_MOD_SPEC = (
@@ -41,10 +40,6 @@ DRACCLIENT_CONSTANTS_REBOOT_REQUIRED_MOD_SPEC = (
     'false'
 )
 
-DRACCLIENT_CONSTANTS_RAID_STATUS_MOD_SPEC = (
-    'jbod',
-    'raid'
-)
 
 # proliantutils
 PROLIANTUTILS_SPEC = (

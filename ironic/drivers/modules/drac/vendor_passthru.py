@@ -186,7 +186,6 @@ class DracVendorPassthru(DracWSManVendorPassthru):
     """
 
     def __init__(self):
-        super(DracVendorPassthru, self).__init__()
         LOG.warning("Vendor passthru interface 'idrac' is deprecated and may "
                     "be removed in a future release. Use 'idrac-wsman' "
                     "instead.")

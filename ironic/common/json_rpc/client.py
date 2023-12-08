@@ -153,10 +153,7 @@ class _CallContext(object):
             body['id'] = context.request_id or uuidutils.generate_uuid()
 
         LOG.debug("RPC %s with %s", method, strutils.mask_dict_password(body))
-        scheme = 'http'
-        if CONF.json_rpc.use_ssl:
-            scheme = 'https'
-        url = '%s://%s:%d' % (scheme, self.host, CONF.json_rpc.port)
+        url = 'http://%s:%d' % (self.host, CONF.json_rpc.port)
         result = _get_session().post(url, json=body)
         LOG.debug('RPC %s returned %s', method,
                   strutils.mask_password(result.text or '<None>'))

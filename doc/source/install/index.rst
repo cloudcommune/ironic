@@ -15,9 +15,8 @@ It contains the following sections:
    get_started.rst
    refarch/index
    install.rst
-   creating-images.rst
-   deploy-ramdisk.rst
    configure-integration.rst
+   deploy-ramdisk.rst
    setup-drivers.rst
    enrollment.rst
    standalone.rst

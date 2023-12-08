@@ -35,14 +35,6 @@ opts = [
                       'sent to a server. There is a risk with some hardware '
                       'that setting this too low may cause the BMC to crash. '
                       'Recommended setting is 5 seconds.')),
-    cfg.BoolOpt('use_ipmitool_retries',
-                default=True,
-                help=_('When set to True and the parameters are supported by '
-                       'ipmitool, the number of retries and the retry '
-                       'interval are passed to ipmitool as parameters, and '
-                       'ipmitool will do the retries.  When set to False, '
-                       'ironic will retry the ipmitool commands. '
-                       'Recommended setting is True')),
     cfg.BoolOpt('kill_on_timeout',
                 default=True,
                 help=_('Kill `ipmitool` process invoked by ironic to read '
@@ -61,12 +53,6 @@ opts = [
                     default=[],
                     help=_('Additional errors ipmitool may encounter, '
                            'specific to the environment it is run in.')),
-    cfg.BoolOpt('debug',
-                default=False,
-                help=_('Enables all ipmi commands to be executed with an '
-                       'additional debugging output. This is a separate '
-                       'option as ipmitool can log a substantial amount '
-                       'of misleading text when in this mode.')),
 ]
 
 

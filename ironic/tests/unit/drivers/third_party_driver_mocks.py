@@ -95,10 +95,6 @@ if not dracclient:
         true=mock.sentinel.true,
         optional=mock.sentinel.optional,
         false=mock.sentinel.false)
-    dracclient.constants.RaidStatus = mock.MagicMock(
-        spec_set=mock_specs.DRACCLIENT_CONSTANTS_RAID_STATUS_MOD_SPEC,
-        jbod=mock.sentinel.jbod,
-        raid=mock.sentinel.raid)
 
     sys.modules['dracclient'] = dracclient
     sys.modules['dracclient.client'] = dracclient.client
@@ -106,17 +102,6 @@ if not dracclient:
     sys.modules['dracclient.exceptions'] = dracclient.exceptions
     dracclient.exceptions.BaseClientException = type('BaseClientException',
                                                      (Exception,), {})
-
-    dracclient.exceptions.DRACRequestFailed = type(
-        'DRACRequestFailed', (dracclient.exceptions.BaseClientException,), {})
-
-    class DRACOperationFailed(dracclient.exceptions.DRACRequestFailed):
-        def __init__(self, **kwargs):
-            super(DRACOperationFailed, self).__init__(
-                'DRAC operation failed. Messages: %(drac_messages)s' % kwargs)
-
-    dracclient.exceptions.DRACOperationFailed = DRACOperationFailed
-
     # Now that the external library has been mocked, if anything had already
     # loaded any of the drivers, reload them.
     if 'ironic.drivers.modules.drac' in sys.modules:
@@ -262,8 +247,8 @@ if not ibmc_client:
 
     # Mock iBMC client exceptions
     exceptions = mock.MagicMock()
-    exceptions.IBMCConnectionError = (
-        type('IBMCConnectionError', (MockKwargsException,), {}))
+    exceptions.ConnectionError = (
+        type('ConnectionError', (MockKwargsException,), {}))
     exceptions.IBMCClientError = (
         type('IBMCClientError', (MockKwargsException,), {}))
     sys.modules['ibmc_client.exceptions'] = exceptions

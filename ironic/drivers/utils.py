@@ -324,7 +324,7 @@ def store_ramdisk_logs(node, logs, label=None):
                 f.name, object_headers=object_headers)
 
 
-def collect_ramdisk_logs(node, label=None):
+def collect_ramdisk_logs(node):
     """Collect and store the system logs from the IPA ramdisk.
 
     Collect and store the system logs from the IPA ramdisk. This method
@@ -332,11 +332,8 @@ def collect_ramdisk_logs(node, label=None):
     according to the configured storage backend.
 
     :param node: A node object.
-    :param label: A string to label the log file such as a clean step name.
-    """
-    if CONF.agent.deploy_logs_collect == 'never':
-        return
 
+    """
     client = agent_client.AgentClient()
     try:
         result = client.collect_system_logs(node)
@@ -354,8 +351,7 @@ def collect_ramdisk_logs(node, label=None):
         return
 
     try:
-        store_ramdisk_logs(node, result['command_result']['system_logs'],
-                           label=label)
+        store_ramdisk_logs(node, result['command_result']['system_logs'])
     except exception.SwiftOperationError as e:
         LOG.error('Failed to store the logs from the node %(node)s '
                   'deployment in Swift. Error: %(error)s',

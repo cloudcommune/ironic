@@ -15,7 +15,6 @@ import copy
 from neutronclient.common import exceptions as neutron_exceptions
 from neutronclient.v2_0 import client as clientv20
 from oslo_log import log
-from oslo_utils import netutils
 from oslo_utils import uuidutils
 import retrying
 
@@ -193,32 +192,6 @@ def _verify_security_groups(security_groups, client):
     raise exception.NetworkError(msg)
 
 
-def _add_ip_addresses_for_ipv6_stateful(port, client):
-    """Add additional IP addresses to the ipv6 stateful neutron port
-
-    When network booting with DHCPv6-stateful we cannot control the CLID/IAID
-    used by the different clients, UEFI, iPXE, Ironic IPA etc. Multiple
-    IP address reservation is required in the DHCPv6 server to avoid
-    NoAddrsAvail issues.
-
-    :param port: A neutron port
-    :param client: Neutron client
-    """
-    fixed_ips = port['port']['fixed_ips']
-    if (not fixed_ips
-            or not netutils.is_valid_ipv6(fixed_ips[0]['ip_address'])):
-        return
-
-    subnet = client.show_subnet(
-        port['port']['fixed_ips'][0]['subnet_id']).get('subnet')
-    if subnet and subnet['ipv6_address_mode'] == 'dhcpv6-stateful':
-        for i in range(1, CONF.neutron.dhcpv6_stateful_address_count):
-            fixed_ips.append({'subnet_id': subnet['id']})
-
-        body = {'port': {'fixed_ips': fixed_ips}}
-        client.update_port(port['port']['id'], body)
-
-
 def add_ports_to_network(task, network_uuid, security_groups=None):
     """Create neutron ports to boot the ramdisk.
 
@@ -290,6 +263,9 @@ def add_ports_to_network(task, network_uuid, security_groups=None):
         port_body['port']['mac_address'] = ironic_port.address
         binding_profile = {'local_link_information':
                            [portmap[ironic_port.uuid]]}
+        provision_vlan = ironic_port.extra.get('provision_vlan')
+        if provision_vlan:
+            binding_profile.update({'provision_vlan': provision_vlan})
         port_body['port']['binding:profile'] = binding_profile
 
         if not ironic_port.pxe_enabled:
@@ -322,8 +298,6 @@ def add_ports_to_network(task, network_uuid, security_groups=None):
                 wait_for_host_agent(client,
                                     port_body['port']['binding:host_id'])
             port = client.create_port(port_body)
-            if CONF.neutron.dhcpv6_stateful_address_count > 1:
-                _add_ip_addresses_for_ipv6_stateful(port, client)
             if is_smart_nic:
                 wait_for_port_status(client, port['port']['id'], 'ACTIVE')
         except neutron_exceptions.NeutronClientException as e:

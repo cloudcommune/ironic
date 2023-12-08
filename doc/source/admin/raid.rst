@@ -94,8 +94,7 @@ Optional properties
 ^^^^^^^^^^^^^^^^^^^
 
 These properties have default values and they may be overridden in the
-specification of any logical disk. None of these options are supported for
-software RAID.
+specification of any logical disk.
 
 - ``volume_name`` - Name of the volume. Should be unique within the Node.
   If not specified, volume name will be auto-generated.
@@ -112,12 +111,11 @@ Backing physical disk hints
 These hints are specified for each logical disk to let Ironic find the desired
 disks for RAID configuration. This is machine-independent information. This
 serves the use-case where the operator doesn't want to provide individual
-details for each bare metal node. None of these options are supported for
-software RAID.
+details for each bare metal node.
 
 - ``share_physical_disks`` - Set to ``true`` if this logical disk can
   share physical disks with other logical disks. The default value is
-  ``false``, except for software RAID which always shares disks.
+  ``false``.
 
 - ``disk_type`` - ``hdd`` or ``ssd``. If this is not specified, disk type
   will not be a criterion to find backing physical disks.
@@ -128,7 +126,7 @@ software RAID.
 
 - ``number_of_physical_disks`` - Integer, number of disks to use for the
   logical disk. Defaults to minimum number of disks required for the
-  particular RAID level, except for software RAID which always spans all disks.
+  particular RAID level.
 
 Backing physical disks
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -143,7 +141,7 @@ are hardware dependent.
   In order to trigger the setup of a Software RAID via the Ironic Python
   Agent, the value of this property needs to be set to ``software``.
 - ``physical_disks`` - A list of physical disks to use as read by the
-  RAID interface. Not supported for software RAID.
+  RAID interface.
 
 .. note::
     If properties from both "Backing physical disk hints" or
@@ -373,9 +371,6 @@ There are certain limitations to be aware of:
   ``mdadm`` utility installed and needs to be able to detect software RAID
   devices at boot time (which is usually done by having the RAID drivers
   embedded in the image's initrd).
-
-* For local boot, UEFI is not supported and you must use legacy BIOS mode.
-  UEFI support arrives in Ussuri.
 
 * Regular cleaning will not remove RAID configuration (similarly to hardware
   RAID). To destroy RAID run the ``delete_configuration`` manual clean step.

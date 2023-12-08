@@ -60,8 +60,7 @@ class AgentClient(object):
         retry_on_exception=(
             lambda e: isinstance(e, exception.AgentConnectionFailed)),
         stop_max_attempt_number=CONF.agent.max_command_attempts)
-    def _command(self, node, method, params, wait=False,
-                 command_timeout_factor=1):
+    def _command(self, node, method, params, wait=False):
         """Sends command to agent.
 
         :param node: A Node object.
@@ -71,13 +70,6 @@ class AgentClient(object):
                        body.
         :param wait: True to wait for the command to finish executing, False
                      otherwise.
-        :param command_timeout_factor: An integer, default 1, by which to
-                                       multiply the [agent]command_timeout
-                                       value. This is intended for use with
-                                       extremely long running commands to
-                                       the agent ramdisk where a general
-                                       timeout value should not be extended
-                                       in all cases.
         :raises: IronicException when failed to issue the request or there was
                  a malformed response from the agent.
         :raises: AgentAPIError when agent failed to execute specified command.
@@ -93,9 +85,8 @@ class AgentClient(object):
                   {'node': node.uuid, 'method': method})
 
         try:
-            response = self.session.post(
-                url, params=request_params, data=body,
-                timeout=CONF.agent.command_timeout * command_timeout_factor)
+            response = self.session.post(url, params=request_params, data=body,
+                                         timeout=CONF.agent.command_timeout)
         except (requests.ConnectionError, requests.Timeout) as e:
             msg = (_('Failed to connect to the agent running on node %(node)s '
                      'for invoking command %(method)s. Error: %(error)s') %
@@ -142,10 +133,6 @@ class AgentClient(object):
         return result
 
     @METRICS.timer('AgentClient.get_commands_status')
-    @retrying.retry(
-        retry_on_exception=(
-            lambda e: isinstance(e, exception.AgentConnectionFailed)),
-        stop_max_attempt_number=CONF.agent.max_command_attempts)
     def get_commands_status(self, node):
         """Get command status from agent.
 
@@ -175,16 +162,7 @@ class AgentClient(object):
         """
         url = self._get_command_url(node)
         LOG.debug('Fetching status of agent commands for node %s', node.uuid)
-        try:
-            resp = self.session.get(url, timeout=CONF.agent.command_timeout)
-        except (requests.ConnectionError, requests.Timeout) as e:
-            msg = (_('Failed to connect to the agent running on node %(node)s '
-                     'to collect commands status. '
-                     'Error: %(error)s') %
-                   {'node': node.uuid, 'error': e})
-            LOG.error(msg)
-            raise exception.AgentConnectionFailed(reason=msg)
-
+        resp = self.session.get(url, timeout=CONF.agent.command_timeout)
         result = resp.json()['commands']
         status = '; '.join('%(cmd)s: result "%(res)s", error "%(err)s"' %
                            {'cmd': r.get('command_name'),
@@ -273,20 +251,10 @@ class AgentClient(object):
         params = {'root_uuid': root_uuid,
                   'efi_system_part_uuid': efi_system_part_uuid,
                   'prep_boot_part_uuid': prep_boot_part_uuid}
-
-        # NOTE(TheJulia): This command explicitly sends a larger timeout
-        # factor to the _command call such that the agent ramdisk has enough
-        # time to perform its work.
-        # TODO(TheJulia): We should likely split install_bootloader into many
-        # commands at some point, even though that would not be backwards
-        # compatible. We could at least begin to delineate the commands apart
-        # over the next cycle or two so we don't need a command timeout
-        # extension factor.
         return self._command(node=node,
                              method='image.install_bootloader',
                              params=params,
-                             wait=True,
-                             command_timeout_factor=2)
+                             wait=True)
 
     @METRICS.timer('AgentClient.get_clean_steps')
     def get_clean_steps(self, node, ports):

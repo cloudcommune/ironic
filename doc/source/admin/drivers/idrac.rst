@@ -70,7 +70,7 @@ all using WSMAN, add the following to your ``/etc/ironic/ironic.conf``:
 .. code-block:: ini
 
     [DEFAULT]
-    enabled_hardware_types=idrac
+    enabled_hardware_types=idrac-wsman
     enabled_management_interfaces=idrac-wsman
     enabled_power_interfaces=idrac-wsman
 
@@ -140,8 +140,6 @@ The Redfish protocol requires the following properties:
   the scheme is missing, https is assumed.
 * ``redfish_system_id``: The Redfish ID of the server to be
   managed. This should always be: ``/redfish/v1/Systems/System.Embedded.1``.
-
-For other Redfish protocol parameters see :doc:`/admin/drivers/redfish`.
 
 If using only interfaces which use WSMAN (``idrac-wsman``), then only
 the WSMAN properties must be supplied. If using only interfaces which
@@ -588,37 +586,3 @@ the Ironic power state poll interval to 70 seconds. See
 
 .. _Ironic_RAID: https://docs.openstack.org/ironic/latest/admin/raid.html
 .. _iDRAC: https://www.dell.com/idracmanuals
-
-Vendor passthru timeout
------------------------
-
-When iDRAC is not ready and executing vendor passthru commands, they take more
-time as waiting for iDRAC to become ready again and then time out, for example:
-
-.. code-block:: bash
-
-  openstack baremetal node passthru call --http-method GET \
-    aed58dca-1b25-409a-a32f-3a817d59e1e0 list_unfinished_jobs
-  Timed out waiting for a reply to message ID 547ce7995342418c99ef1ea4a0054572 (HTTP 500)
-
-To avoid this need to increase timeout for messaging in ``/etc/ironic/ironic.conf``
-and restart Ironic API service.
-
-.. code-block:: ini
-
-  [DEFAULT]
-  rpc_response_timeout = 600
-
-Timeout when powering off
--------------------------
-
-Some servers might be slow when soft powering off and time out. The default retry count
-is 6, resulting in 30 seconds timeout (the default retry interval set by
-``post_deploy_get_power_state_retry_interval`` is 5 seconds).
-To resolve this issue, increase the timeout to 90 seconds by setting the retry count to
-18 as follows:
-
-.. code-block:: ini
-
-    [agent]
-    post_deploy_get_power_state_retries = 18

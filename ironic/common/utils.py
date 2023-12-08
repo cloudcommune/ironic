@@ -230,12 +230,12 @@ def _get_hash_object(hash_algo_name):
     return getattr(hashlib, hash_algo_name)()
 
 
-def file_has_content(path, content, hash_algo='sha256'):
+def file_has_content(path, content, hash_algo='md5'):
     """Checks that content of the file is the same as provided reference.
 
     :param path: path to file
     :param content: reference content to check against
-    :param hash_algo: hashing algo from hashlib to use, default is 'sha256'
+    :param hash_algo: hashing algo from hashlib to use, default is 'md5'
     :returns: True if the hash of reference content is the same as
         the hash of file's content, False otherwise
     """
@@ -474,12 +474,7 @@ def render_template(template, params, is_file=True):
     else:
         tmpl_name = 'template'
         loader = jinja2.DictLoader({tmpl_name: template})
-    # NOTE(pas-ha) bandit does not seem to cope with such syntaxis
-    # and still complains with B701 for that line
-    # NOTE(pas-ha) not using default_for_string=False as we set the name
-    # of the template above for strings too.
-    env = jinja2.Environment(loader=loader,  # nosec B701
-                             autoescape=jinja2.select_autoescape())
+    env = jinja2.Environment(loader=loader, autoescape=True)
     tmpl = env.get_template(tmpl_name)
     return tmpl.render(params, enumerate=enumerate)
 
@@ -537,31 +532,3 @@ def validate_conductor_group(conductor_group):
         raise exception.InvalidConductorGroup(group=conductor_group)
     if not re.match(r'^[a-zA-Z0-9_\-\.]*$', conductor_group):
         raise exception.InvalidConductorGroup(group=conductor_group)
-
-
-def set_node_nested_field(node, collection, field, value):
-    """Set a value in a dictionary field of a node.
-
-    :param node: Node object.
-    :param collection: Name of the field with the dictionary.
-    :param field: Nested field name.
-    :param value: New value.
-    """
-    col = getattr(node, collection)
-    col[field] = value
-    setattr(node, collection, col)
-
-
-def pop_node_nested_field(node, collection, field, default=None):
-    """Pop a value from a dictionary field of a node.
-
-    :param node: Node object.
-    :param collection: Name of the field with the dictionary.
-    :param field: Nested field name.
-    :param default: The default value to return.
-    :return: The removed value or the default.
-    """
-    col = getattr(node, collection)
-    result = col.pop(field, default)
-    setattr(node, collection, col)
-    return result

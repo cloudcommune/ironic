@@ -168,32 +168,33 @@ protocol version::
    Version *1.5* of the IPMI protocol does not support encryption.
    Therefore, it is highly recommended that version 2.0 is used.
 
-Cipher suites
-~~~~~~~~~~~~~
-
-IPMI 2.0 introduces support for encryption and allows setting which cipher
-suite to use. Traditionally, ``ipmitool`` was using cipher suite 3 by default,
-but since SHA1 no longer complies with modern security requirement, recent
-versions (e.g. the one used in RHEL 8.2) are switching to suite 17.
-
-Normally, the cipher suite to use is negotiated with the BMC using the special
-command. On some hardware the negotiation yields incorrect results and IPMI
-commands fail with
-::
-
-    Error in open session response message : no matching cipher suite
-    Error: Unable to establish IPMI v2 / RMCP+ session
-
-Another possible problem is ``ipmitool`` commands taking very long (tens of
-seconds or even minutes) because the BMC does not support cipher suite
-negotiation. In both cases you can specify the required suite yourself, e.g.::
-
-    openstack baremetal node set <UUID or name> --driver-info ipmi_cipher_suite=3
-
 Static boot order configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-See :ref:`static-boot-order`.
+Some hardware is known to misbehave when changing the boot device through the
+IPMI protocol. To work around it you can use the ``noop`` management interface
+implementation with the ``ipmi`` hardware type. In this case the Bare Metal
+service will not change the boot device for you, leaving the pre-configured
+boot order.
+
+For example, in case of the :ref:`pxe-boot`:
+
+#. Via any available means configure the boot order on the node as follows:
+
+   #. Boot from PXE/iPXE on the provisioning NIC.
+
+      .. warning::
+         If it is not possible to limit network boot to only provisioning NIC,
+         make sure that no other DHCP/PXE servers are accessible by the node.
+
+   #. Boot from hard drive.
+
+#. Make sure the ``noop`` management interface is enabled, see example in
+   `Enabling the IPMI hardware type`_.
+
+#. Change the node to use the ``noop`` management interface::
+
+      openstack baremetal node set <NODE> --management-interface noop
 
 .. TODO(lucasagomes): Write about privilege level
 .. TODO(lucasagomes): Write about force boot device

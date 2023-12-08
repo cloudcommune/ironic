@@ -15,7 +15,6 @@
 DRAC RAID specific methods
 """
 
-from collections import defaultdict
 import math
 
 from futurist import periodics
@@ -310,43 +309,6 @@ def clear_foreign_config(node, raid_controller):
         raise exception.DracOperationError(error=exc)
 
 
-def change_physical_disk_state(node, mode=None,
-                               controllers_to_physical_disk_ids=None):
-    """Convert disks RAID status
-
-    This method converts the requested physical disks from
-    RAID to JBOD or vice versa.  It does this by only converting the
-    disks that are not already in the correct state.
-
-    :param node: an ironic node object.
-    :param mode: the mode to change the disks either to RAID or JBOD.
-    :param controllers_to_physical_disk_ids: Dictionary of controllers and
-           corresponding disk ids to convert to the requested mode.
-    :return: a dictionary containing:
-             - conversion_results, a dictionary that maps controller ids
-             to the conversion results for that controller.
-             The conversion results are a dict that contains:
-             - The is_commit_required key with the value always set to
-             True indicating that a config job must be created to
-             complete disk conversion.
-             - The is_reboot_required key with a RebootRequired
-             enumerated value indicating whether the server must be
-             rebooted to complete disk conversion.
-    :raises: DRACOperationError on an error from python-dracclient.
-    """
-    try:
-        drac_job.validate_job_queue(node)
-        client = drac_common.get_drac_client(node)
-        return client.change_physical_disk_state(
-            mode, controllers_to_physical_disk_ids)
-    except drac_exceptions.BaseClientException as exc:
-        LOG.error('DRAC driver failed to change physical drives '
-                  'to %(mode)s mode for node %(node_uuid)s. '
-                  'Reason: %(error)s.',
-                  {'mode': mode, 'node_uuid': node.uuid, 'error': exc})
-        raise exception.DracOperationError(error=exc)
-
-
 def commit_config(node, raid_controller, reboot=False, realtime=False):
     """Apply all pending changes on a RAID controller.
 
@@ -374,43 +336,6 @@ def commit_config(node, raid_controller, reboot=False, realtime=False):
                    'node_uuid': node.uuid,
                    'error': exc})
         raise exception.DracOperationError(error=exc)
-
-
-def _change_physical_disk_mode(node, mode=None,
-                               controllers_to_physical_disk_ids=None,
-                               substep="completed"):
-    """Physical drives conversion from RAID to JBOD or vice-versa.
-
-    :param node: an ironic node object.
-    :param mode: the mode to change the disks either to RAID or JBOD.
-    :param controllers_to_physical_disk_ids: Dictionary of controllers and
-           corresponding disk ids to convert to the requested mode.
-    :returns: states.CLEANWAIT if deletion is in progress asynchronously
-              or None if it is completed.
-    """
-    change_disk_state = change_physical_disk_state(
-        node, mode, controllers_to_physical_disk_ids)
-
-    controllers = list()
-    if 'conversion_results' in change_disk_state:
-        conversion_results = change_disk_state['conversion_results']
-        for controller_id, result in conversion_results.items():
-            controller = {'raid_controller': controller_id,
-                          'is_reboot_required': result['is_reboot_required'],
-                          'is_commit_required': result['is_commit_required']}
-            controllers.append(controller)
-    else:
-        controller_ids = change_disk_state['commit_required_ids']
-        for controller_id in controller_ids:
-            controller = {'raid_controller': controller_id,
-                          'is_reboot_required':
-                          change_disk_state['is_reboot_required'],
-                          'is_commit_required': True}
-            controllers.append(controller)
-
-    return _commit_to_controllers(
-        node,
-        controllers, substep=substep)
 
 
 def abandon_config(node, raid_controller):
@@ -689,7 +614,7 @@ def _calculate_volume_props(logical_disk, physical_disks, free_space_mb):
         error_msg = _('invalid number of physical disks was provided')
         raise exception.DracOperationError(error=error_msg)
 
-    disks_per_span = int(len(selected_disks) / spans_count)
+    disks_per_span = len(selected_disks) / spans_count
 
     # Best practice is to not pass span_length and span_depth when creating a
     # RAID10.  The iDRAC will dynamically calculate these values using maximum
@@ -848,40 +773,6 @@ def _create_config_job(node, controller, reboot=False, realtime=False,
             'raid_config_parameters': raid_config_parameters}
 
 
-def _validate_volume_size(node, logical_disks):
-    new_physical_disks = list_physical_disks(node)
-    free_space_mb = {}
-    new_processed_volumes = []
-    for disk in new_physical_disks:
-        free_space_mb[disk] = disk.free_size_mb
-
-    for logical_disk in logical_disks:
-        selected_disks = [disk for disk in new_physical_disks
-                          if disk.id in logical_disk['physical_disks']]
-
-        spans_count = _calculate_spans(
-            logical_disk['raid_level'], len(selected_disks))
-
-        new_max_vol_size_mb = _max_volume_size_mb(
-            logical_disk['raid_level'],
-            selected_disks,
-            free_space_mb,
-            spans_count=spans_count)
-
-        if logical_disk['size_mb'] > new_max_vol_size_mb:
-            logical_disk['size_mb'] = new_max_vol_size_mb
-            LOG.info("Logical size does not match so calculating volume "
-                     "properties for current logical_disk")
-            _calculate_volume_props(
-                logical_disk, new_physical_disks, free_space_mb)
-            new_processed_volumes.append(logical_disk)
-
-    if new_processed_volumes:
-        return new_processed_volumes
-
-    return logical_disks
-
-
 def _commit_to_controllers(node, controllers, substep="completed"):
     """Commit changes to RAID controllers on the node.
 
@@ -942,18 +833,18 @@ def _commit_to_controllers(node, controllers, substep="completed"):
     else:
         for controller in controllers:
             mix_controller = controller['raid_controller']
-            reboot = (controller == controllers[-1])
+            reboot = True if controller == controllers[-1] else False
             job_details = _create_config_job(
                 node, controller=mix_controller,
                 reboot=reboot, realtime=False,
                 raid_config_job_ids=raid_config_job_ids,
                 raid_config_parameters=raid_config_parameters)
 
-    driver_internal_info['raid_config_job_ids'].extend(job_details[
-        'raid_config_job_ids'])
+    driver_internal_info['raid_config_job_ids'] = job_details[
+        'raid_config_job_ids']
 
-    driver_internal_info['raid_config_parameters'].extend(job_details[
-        'raid_config_parameters'])
+    driver_internal_info['raid_config_parameters'] = job_details[
+        'raid_config_parameters']
 
     node.driver_internal_info = driver_internal_info
 
@@ -968,40 +859,6 @@ def _commit_to_controllers(node, controllers, substep="completed"):
         polling=True)
 
     return deploy_utils.get_async_step_return_state(node)
-
-
-def _create_virtual_disks(task, node):
-    logical_disks_to_create = node.driver_internal_info[
-        'logical_disks_to_create']
-
-    # Check valid properties attached to voiume after drives conversion
-    isVolValidationNeeded = node.driver_internal_info[
-        'volume_validation']
-    if isVolValidationNeeded:
-        logical_disks_to_create = _validate_volume_size(
-            node, logical_disks_to_create)
-
-    controllers = list()
-    for logical_disk in logical_disks_to_create:
-        controller = dict()
-        controller_cap = create_virtual_disk(
-            node,
-            raid_controller=logical_disk['controller'],
-            physical_disks=logical_disk['physical_disks'],
-            raid_level=logical_disk['raid_level'],
-            size_mb=logical_disk['size_mb'],
-            disk_name=logical_disk.get('name'),
-            span_length=logical_disk.get('span_length'),
-            span_depth=logical_disk.get('span_depth'))
-        controller['raid_controller'] = logical_disk['controller']
-        controller['is_reboot_required'] = controller_cap[
-            'is_reboot_required']
-        controller['is_commit_required'] = controller_cap[
-            'is_commit_required']
-        if controller not in controllers:
-            controllers.append(controller)
-
-    return _commit_to_controllers(node, controllers)
 
 
 def _get_disk_free_size_mb(disk, pending_delete):
@@ -1083,7 +940,6 @@ class DracWSManRAID(base.RAIDInterface):
         node = task.node
 
         logical_disks = node.target_raid_config['logical_disks']
-
         for disk in logical_disks:
             if disk['size_gb'] == 'MAX' and 'physical_disks' not in disk:
                 raise exception.InvalidParameterValue(
@@ -1102,7 +958,9 @@ class DracWSManRAID(base.RAIDInterface):
             del disk['size_gb']
 
         if delete_existing:
-            self._delete_configuration_no_commit(task)
+            controllers = self._delete_configuration_no_commit(task)
+        else:
+            controllers = list()
 
         physical_disks = list_physical_disks(node)
         logical_disks = _find_configuration(logical_disks, physical_disks,
@@ -1111,45 +969,26 @@ class DracWSManRAID(base.RAIDInterface):
         logical_disks_to_create = _filter_logical_disks(
             logical_disks, create_root_volume, create_nonroot_volumes)
 
-        controllers_to_physical_disk_ids = defaultdict(list)
         for logical_disk in logical_disks_to_create:
-            # Not applicable to JBOD logical disks.
-            if logical_disk['raid_level'] == 'JBOD':
-                continue
+            controller = dict()
+            controller_cap = create_virtual_disk(
+                node,
+                raid_controller=logical_disk['controller'],
+                physical_disks=logical_disk['physical_disks'],
+                raid_level=logical_disk['raid_level'],
+                size_mb=logical_disk['size_mb'],
+                disk_name=logical_disk.get('name'),
+                span_length=logical_disk.get('span_length'),
+                span_depth=logical_disk.get('span_depth'))
+            controller['raid_controller'] = logical_disk['controller']
+            controller['is_reboot_required'] = controller_cap[
+                'is_reboot_required']
+            controller['is_commit_required'] = controller_cap[
+                'is_commit_required']
+            if controller not in controllers:
+                controllers.append(controller)
 
-            for physical_disk_name in logical_disk['physical_disks']:
-                controllers_to_physical_disk_ids[
-                    logical_disk['controller']].append(
-                    physical_disk_name)
-
-        # adding logical_disks to driver_internal_info to create virtual disks
-        driver_internal_info = node.driver_internal_info
-        driver_internal_info[
-            "logical_disks_to_create"] = logical_disks_to_create
-
-        commit_results = None
-        if logical_disks_to_create:
-            LOG.debug(
-                "Converting physical disks configured to back RAID "
-                "logical disks to RAID mode for node %(node_uuid)s ",
-                {"node_uuid": node.uuid})
-            raid_mode = drac_constants.RaidStatus.raid
-            commit_results = _change_physical_disk_mode(
-                node, raid_mode,
-                controllers_to_physical_disk_ids,
-                substep="create_virtual_disks")
-
-        volume_validation = True if commit_results else False
-        driver_internal_info['volume_validation'] = volume_validation
-        node.driver_internal_info = driver_internal_info
-        node.save()
-
-        if commit_results:
-            return commit_results
-        else:
-            LOG.debug("Controller does not support drives conversion "
-                      "so creating virtual disks")
-            return _create_virtual_disks(task, node)
+        return _commit_to_controllers(node, controllers)
 
     @METRICS.timer('DracRAID.delete_configuration')
     @base.clean_step(priority=0)
@@ -1211,7 +1050,7 @@ class DracWSManRAID(base.RAIDInterface):
                 with task_manager.acquire(context, node_uuid,
                                           purpose=lock_purpose,
                                           shared=True) as task:
-                    if not isinstance(task.driver.raid, DracWSManRAID):
+                    if not isinstance(task.driver.raid, DracRAID):
                         continue
 
                     job_ids = driver_internal_info.get('raid_config_job_ids')
@@ -1255,17 +1094,11 @@ class DracWSManRAID(base.RAIDInterface):
         if not node.driver_internal_info.get('raid_config_job_failure',
                                              False):
             if 'raid_config_substep' in node.driver_internal_info:
-                substep = node.driver_internal_info['raid_config_substep']
-
-                if substep == 'delete_foreign_config':
-                    foreign_drives = self._execute_foreign_drives(task, node)
-                    if foreign_drives is None:
-                        return self._convert_drives(task, node)
-                elif substep == 'physical_disk_conversion':
-                    self._convert_drives(task, node)
-                elif substep == "create_virtual_disks":
-                    return _create_virtual_disks(task, node)
-                elif substep == 'completed':
+                if node.driver_internal_info['raid_config_substep'] == \
+                        'delete_foreign_config':
+                    self._execute_foreign_drives(task, node)
+                elif node.driver_internal_info['raid_config_substep'] == \
+                        'completed':
                     self._complete_raid_substep(task, node)
             else:
                 self._complete_raid_substep(task, node)
@@ -1293,26 +1126,16 @@ class DracWSManRAID(base.RAIDInterface):
             LOG.info(
                 "No foreign drives detected, so "
                 "resume %s", "cleaning" if node.clean_step else "deployment")
-            return None
+            self._complete_raid_substep(task, node)
         else:
-            return _commit_to_controllers(
+            _commit_to_controllers(
                 node,
                 controllers,
-                substep='physical_disk_conversion')
+                substep='completed')
 
     def _complete_raid_substep(self, task, node):
         self._clear_raid_substep(node)
         self._resume(task)
-
-    def _convert_drives(self, task, node):
-        jbod = drac_constants.RaidStatus.jbod
-        drives_results = _change_physical_disk_mode(
-            node, mode=jbod)
-        if drives_results is None:
-            LOG.debug("Controller does not support drives "
-                      "conversion on %(node_uuid)s",
-                      {'node_uuid': node.uuid})
-            self._complete_raid_substep(task, node)
 
     def _clear_raid_substep(self, node):
         driver_internal_info = node.driver_internal_info
@@ -1397,6 +1220,5 @@ class DracRAID(DracWSManRAID):
     """
 
     def __init__(self):
-        super(DracRAID, self).__init__()
         LOG.warning("RAID interface 'idrac' is deprecated and may be removed "
                     "in a future release. Use 'idrac-wsman' instead.")

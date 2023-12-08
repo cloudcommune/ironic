@@ -123,7 +123,7 @@ Requirements
 ============
 
 Ansible
-    Tested with, and targets, Ansible 2.5.x
+    Tested with, and targets, Ansible 2.4.x
 
 Bootstrap image requirements
 ----------------------------

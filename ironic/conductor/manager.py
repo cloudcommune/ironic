@@ -75,7 +75,6 @@ from ironic.conductor import task_manager
 from ironic.conductor import utils
 from ironic.conf import CONF
 from ironic.drivers import base as drivers_base
-from ironic.drivers import utils as driver_utils
 from ironic import objects
 from ironic.objects import base as objects_base
 from ironic.objects import fields
@@ -1054,7 +1053,7 @@ class ConductorManager(base_manager.BaseConductorManager):
                 LOG.exception('Error in tear_down of node %(node)s: %(err)s',
                               {'node': node.uuid, 'err': e})
                 node.last_error = _("Failed to tear down. Error: %s") % e
-                task.process_event('fail')
+                task.process_event('error')
         else:
             # NOTE(deva): When tear_down finishes, the deletion is done,
             # cleaning will start next
@@ -1459,7 +1458,6 @@ class ConductorManager(base_manager.BaseConductorManager):
                        {'node': node.uuid, 'exc': e,
                         'step': node.clean_step})
                 LOG.exception(msg)
-                driver_utils.collect_ramdisk_logs(task.node, label='cleaning')
                 utils.cleaning_error_handler(task, msg)
                 return
 
@@ -1483,9 +1481,6 @@ class ConductorManager(base_manager.BaseConductorManager):
                 return utils.cleaning_error_handler(task, msg)
             LOG.info('Node %(node)s finished clean step %(step)s',
                      {'node': node.uuid, 'step': step})
-
-        if CONF.agent.deploy_logs_collect == 'always':
-            driver_utils.collect_ramdisk_logs(node, label='cleaning')
 
         # Clear clean_step
         node.clean_step = None
@@ -2329,7 +2324,6 @@ class ConductorManager(base_manager.BaseConductorManager):
         # we would disallow it otherwise. That's done for recovering hopelessly
         # broken nodes (e.g. with broken BMC).
         with task_manager.acquire(context, node_id,
-                                  load_driver=False,
                                   purpose='node deletion') as task:
             node = task.node
             if not node.maintenance and node.instance_uuid is not None:
@@ -2364,17 +2358,6 @@ class ConductorManager(base_manager.BaseConductorManager):
             if node.console_enabled:
                 notify_utils.emit_console_notification(
                     task, 'console_set', fields.NotificationStatus.START)
-
-                try:
-                    task.load_driver()
-                except Exception:
-                    with excutils.save_and_reraise_exception():
-                        LOG.exception('Could not load the driver for node %s '
-                                      'to shut down its console', node.uuid)
-                        notify_utils.emit_console_notification(
-                            task, 'console_set',
-                            fields.NotificationStatus.ERROR)
-
                 try:
                     task.driver.console.stop_console(task)
                 except Exception as err:
@@ -3965,10 +3948,7 @@ def _do_next_deploy_step(task, step_index, conductor_id):
                        {'node': node.uuid, 'step': node.deploy_step, 'err': e})
             utils.deploying_error_handler(
                 task, log_msg,
-                _("Failed to deploy: Deploy step %(step)s, "
-                  "error: %(err)s.") % {
-                    'step': node.deploy_step,
-                    'err': e})
+                _("Failed to deploy: %s") % node.deploy_step)
             return
         except Exception as e:
             log_msg = ('Node %(node)s failed deploy step %(step)s with '
@@ -3997,8 +3977,7 @@ def _do_next_deploy_step(task, step_index, conductor_id):
             LOG.info('Deploy step %(step)s on node %(node)s being '
                      'executed asynchronously, waiting for driver.',
                      {'node': node.uuid, 'step': step})
-            if task.node.provision_state != states.DEPLOYWAIT:
-                task.process_event('wait')
+            task.process_event('wait')
             return
         elif result is not None:
             # NOTE(rloo): This is an internal/dev error; shouldn't happen.
