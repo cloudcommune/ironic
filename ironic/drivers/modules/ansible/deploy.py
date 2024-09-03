@@ -574,6 +574,9 @@ class AnsibleDeploy(agent_base.HeartbeatMixin, base.DeployInterface):
             task, power_state_to_restore)
         boot_opt = deploy_utils.build_agent_options(node)
         task.driver.boot.prepare_ramdisk(task, boot_opt)
+        manager_utils.node_set_boot_device(task, 'pxe', persistent=False)
+        LOG.info('prepare cleaning set boot pxe '
+                 'on node %(node)s.',{'node': node.uuid})
         manager_utils.node_power_action(task, states.REBOOT)
         return states.CLEANWAIT
 

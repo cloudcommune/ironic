@@ -743,6 +743,9 @@ class AgentDeployMixin(HeartbeatMixin):
             task.driver.network.configure_tenant_networks(task)
             manager_utils.restore_power_state_if_needed(
                 task, power_state_to_restore)
+            manager_utils.node_set_boot_device(task, 'disk', persistent=False)
+            LOG.info('reboot_and_finish_deploy set boot disk '
+                 'on node %(node)s.',{'node': node.uuid})
             manager_utils.node_power_action(task, states.POWER_ON)
         except Exception as e:
             msg = (_('Error rebooting node %(node)s after deploy. '
