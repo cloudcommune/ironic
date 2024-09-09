@@ -933,6 +933,9 @@ def prepare_inband_cleaning(task, manage_boot=True):
         task.driver.boot.prepare_ramdisk(task, ramdisk_opts)
 
     if not fast_track:
+        manager_utils.node_set_boot_device(task, 'pxe', persistent=False)
+        LOG.info('prepare cleaning set boot pxe '
+                 'on node %(node)s.',{'node': task.node.uuid})
         manager_utils.node_power_action(task, states.REBOOT)
 
     # Tell the conductor we are waiting for the agent to boot.
